@@ -1,3 +1,75 @@
+# MindLedger（个人日常消费记录）
+
+一个简洁的个人消费记录小项目，目标是打通：
+
+- 前端：输入 + 校验 + 提交反馈
+- 后端：API 路由接收数据、验证与错误处理
+- 存储：本地结构化存储（为未来接入 Notion 做准备）
+
+## 运行
+
+```bash
+npm run dev
+```
+
+访问 `http://localhost:3000`（地址以终端输出为准）。
+
+## API
+
+### `GET /api/expenses`
+
+返回最近的消费记录列表（按 `createdAt` 倒序）。
+
+### `POST /api/expenses`
+
+请求体示例：
+
+```json
+{
+  "amount": 23.5,
+  "currency": "CNY",
+  "category": "餐饮",
+  "date": "2026-01-08",
+  "note": "和朋友聚餐",
+  "tags": ["工作", "聚餐"]
+}
+```
+
+成功返回：
+
+- `201`：`{ ok: true, item: ... }`
+
+错误返回：
+
+- `400`：JSON 非法
+- `422`：数据校验失败（包含 `details.fieldErrors`）
+- `500`：服务器错误
+
+## 数据存储结构（Notion 预留）
+
+本地存储文件：`data/expenses.json`
+
+```json
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "uuid",
+      "amount": 23.5,
+      "currency": "CNY",
+      "category": "餐饮",
+      "date": "2026-01-08",
+      "note": "和朋友聚餐",
+      "tags": ["工作", "聚餐"],
+      "createdAt": "2026-01-08T12:34:56.000Z"
+    }
+  ]
+}
+```
+
+未来要接入 Notion 时，可以复用 `src/lib/expenseSchema.ts` 的字段定义与
+`toNotionProperties()` 映射逻辑，然后把 `src/lib/expenseStore.ts` 替换为 Notion API 写入即可。
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
