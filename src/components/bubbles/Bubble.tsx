@@ -7,12 +7,33 @@ export function Bubble(props: {
   label: ReactNode;
   subLabel?: ReactNode;
   radius: number;
-  x: number;
-  y: number;
+  x: number; // center x
+  y: number; // center y
   tone?: "time" | "category" | "action";
   onClick?: () => void;
+  visible?: boolean;
+  scale?: number;
+  floating?: boolean;
+  disabled?: boolean;
+  zIndex?: number;
 }) {
-  const { label, subLabel, radius, x, y, tone = "category", onClick } = props;
+  const {
+    label,
+    subLabel,
+    radius,
+    x,
+    y,
+    tone = "category",
+    onClick,
+    visible = true,
+    scale = 1,
+    floating = true,
+    disabled = false,
+    zIndex,
+  } = props;
+
+  const topLeftX = x - radius;
+  const topLeftY = y - radius;
 
   const colors =
     tone === "time"
@@ -39,31 +60,45 @@ export function Bubble(props: {
       onClick={onClick}
       className="absolute select-none"
       style={{
-        left: x,
-        top: y,
         width: radius * 2,
         height: radius * 2,
-        marginLeft: -radius,
-        marginTop: -radius,
+        pointerEvents: disabled ? "none" : "auto",
+        zIndex,
       }}
-      initial={{ scale: 0.9, opacity: 0 }}
+      initial={{ scale: 0.92, opacity: 0 }}
       animate={{
-        scale: 1,
-        opacity: 1,
-        y: [0, -8, 0],
-        filter: ["brightness(1)", "brightness(1.06)", "brightness(1)"],
+        x: topLeftX,
+        y: topLeftY,
+        scale,
+        opacity: visible ? 1 : 0,
       }}
       transition={{
-        scale: { type: "spring", stiffness: 380, damping: 26 },
+        x: { type: "spring", stiffness: 320, damping: 30 },
+        y: { type: "spring", stiffness: 320, damping: 30 },
+        scale: { type: "spring", stiffness: 380, damping: 28 },
         opacity: { duration: 0.18 },
-        y: { duration: 3.6, repeat: Infinity, ease: "easeInOut" },
-        filter: { duration: 3.6, repeat: Infinity, ease: "easeInOut" },
       }}
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.98 }}
+      whileHover={disabled ? undefined : { scale: scale * 1.05 }}
+      whileTap={disabled ? undefined : { scale: scale * 0.98 }}
     >
-      <div
+      <motion.div
         className="relative h-full w-full rounded-full"
+        animate={
+          floating
+            ? {
+                y: [0, -8, 0],
+                filter: ["brightness(1)", "brightness(1.06)", "brightness(1)"],
+              }
+            : { y: 0, filter: "brightness(1.04)" }
+        }
+        transition={
+          floating
+            ? {
+                y: { duration: 3.6, repeat: Infinity, ease: "easeInOut" },
+                filter: { duration: 3.6, repeat: Infinity, ease: "easeInOut" },
+              }
+            : { duration: 0.2 }
+        }
         style={{
           border: `1px solid ${colors.border}`,
           background: `radial-gradient(circle at 30% 28%, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 18%, ${colors.core} 55%, rgba(0,0,0,0.15) 100%)`,
@@ -100,7 +135,7 @@ export function Bubble(props: {
             </div>
           ) : null}
         </div>
-      </div>
+      </motion.div>
     </motion.button>
   );
 }
