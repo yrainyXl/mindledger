@@ -1,28 +1,43 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useMemo, useState } from "react";
 import { expenseInputSchema } from "@/lib/expenseSchema";
-import { Bubble } from "@/components/bubbles/Bubble";
-import { TIME_SLOTS, type TimeSlot, type TimeSlotKey } from "@/components/bubbles/types";
-import { useContainerSize } from "@/components/bubbles/useContainerSize";
 
 export default function Home() {
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
-  type Mode = "time" | "category" | "amount";
-  const [mode, setMode] = useState<Mode>("time");
-  const [selectedTimeKey, setSelectedTimeKey] = useState<TimeSlotKey | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<{
-    key: string;
-    label: string;
-  } | null>(null);
+  // 手机优先：唯一必填就是金额，其它自动填默认值
+  const [amountText, setAmountText] = useState<string>("");
+  const [category, setCategory] = useState<string>("其他");
+  type TimeKey = "morning" | "noon" | "afternoon" | "evening" | "night";
+  const TIME_PRESETS: { key: TimeKey; label: string; categories: string[] }[] = [
+    { key: "morning", label: "早上", categories: ["早餐", "交通"] },
+    { key: "noon", label: "中午", categories: ["午餐", "购物", "娱乐"] },
+    { key: "afternoon", label: "下午", categories: ["咖啡", "零食"] },
+    { key: "evening", label: "晚上", categories: ["晚餐", "交通", "购物"] },
+    { key: "night", label: "夜晚", categories: ["夜宵", "网购", "出行"] },
+  ];
 
-  const selectedTime = useMemo<TimeSlot | null>(() => {
-    if (!selectedTimeKey) return null;
-    return TIME_SLOTS.find((t) => t.key === selectedTimeKey) ?? null;
-  }, [selectedTimeKey]);
+  const [timeKey, setTimeKey] = useState<TimeKey>(() => {
+    const h = new Date().getHours();
+    if (h >= 5 && h < 11) return "morning";
+    if (h >= 11 && h < 14) return "noon";
+    if (h >= 14 && h < 18) return "afternoon";
+    if (h >= 18 && h < 23) return "evening";
+    return "night";
+  });
+  const timePreset = useMemo(() => {
+    return TIME_PRESETS.find((t) => t.key === timeKey) ?? TIME_PRESETS[1]!;
+  }, [timeKey]);
 
-  const [amountText, setAmountText] = useState("");
+  type CategoryLevel = "time" | "preset" | "general" | "custom";
+  const [categoryLevel, setCategoryLevel] = useState<CategoryLevel>("time");
+  const [customCategory, setCustomCategory] = useState("");
+
+  type QuickMode = "coarse" | "fine";
+  const [quickMode, setQuickMode] = useState<QuickMode>("coarse");
+  const [coarseBase, setCoarseBase] = useState<number | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<
@@ -30,29 +45,6 @@ export default function Home() {
     | { type: "error"; message: string }
     | null
   >(null);
-
-  function back() {
-    setToast(null);
-    setAmountText("");
-    if (mode === "amount") {
-      setMode("category");
-      return;
-    }
-    if (mode === "category") {
-      setMode("time");
-      setSelectedCategory(null);
-      setSelectedTimeKey(null);
-      return;
-    }
-  }
-
-  function resetToRoot() {
-    setToast(null);
-    setAmountText("");
-    setMode("time");
-    setSelectedCategory(null);
-    setSelectedTimeKey(null);
-  }
 
   function parseAmount(input: string) {
     const t = input.trim().replace(/[，,]/g, ".");
@@ -64,8 +56,28 @@ export default function Home() {
     return n;
   }
 
-  async function submitAmount() {
-    if (mode !== "amount" || !selectedTime || !selectedCategory) return;
+  const quickValues = useMemo(() => {
+    if (quickMode === "coarse") return [5, 10, 15, 20, 25, 30];
+    const base = coarseBase ?? 10;
+    const start = Math.max(1, base - 4);
+    // 细分 5 个数：例如 base=10 -> 6..10
+    return Array.from({ length: 5 }, (_, i) => start + i);
+  }, [quickMode, coarseBase]);
+
+  function onQuickTap(v: number) {
+    setToast(null);
+    if (quickMode === "coarse") {
+      setCoarseBase(v);
+      setAmountText(String(v));
+      setQuickMode("fine");
+      return;
+    }
+    setAmountText(String(v));
+    setQuickMode("coarse");
+    setCoarseBase(null);
+  }
+
+  async function submit() {
     setToast(null);
 
     const amount = parseAmount(amountText);
@@ -73,18 +85,20 @@ export default function Home() {
       setToast({ type: "error", message: "请输入金额（例如 14 或 23.5）" });
       return;
     }
+    if (amount <= 0) {
+      setToast({ type: "error", message: "金额必须大于 0" });
+      return;
+    }
 
-    const categoryLabel = selectedCategory.label;
-    const timeLabel = selectedTime.label;
-    const note = `${timeLabel}·${categoryLabel}`;
+    const note = "";
 
     const candidate = {
       amount,
       currency: "CNY",
-      category: categoryLabel,
+      category,
       date: today,
       note,
-      tags: [selectedTime.label],
+      tags: [timePreset.label],
     };
 
     const parsed = expenseInputSchema.safeParse(candidate);
@@ -109,9 +123,10 @@ export default function Home() {
         return;
       }
 
-      setToast({ type: "success", message: "已记录 ✅" });
+      setToast({ type: "success", message: "已记录" });
       setAmountText("");
-      resetToRoot();
+      setQuickMode("coarse");
+      setCoarseBase(null);
     } catch {
       setToast({ type: "error", message: "网络异常，请稍后重试。" });
     } finally {
@@ -119,244 +134,290 @@ export default function Home() {
     }
   }
 
-  const { ref: stageRef, size } = useContainerSize<HTMLDivElement>();
-
-  const timeBubbles = useMemo(() => {
-    return TIME_SLOTS.map((t) => ({
-      id: t.key,
-      time: t,
-      label: t.label,
-      subLabel: t.hint,
-      radius: 78,
-      tone: "time" as const,
-    }));
-  }, []);
-
-  const center = useMemo(() => {
-    return {
-      x: Math.max(1, size.width) / 2,
-      y: Math.max(1, size.height) / 2,
-    };
-  }, [size.width, size.height]);
-
-  const timePositions = useMemo(() => {
-    // 4 个时间气泡：固定为“花瓣”布局，确保轻微相交且不散乱
-    const w = Math.max(1, size.width);
-    const h = Math.max(1, size.height);
-    if (w === 1 || h === 1) return {};
-
-    const r = 78;
-    // offset 决定相交程度：越小重叠越多；这里做轻微相交
-    const offset = r * 1.25;
-    const pad = r + 10;
-
-    const clamp = (v: number, min: number, max: number) =>
-      Math.max(min, Math.min(max, v));
-
-    const cx = clamp(center.x, pad, w - pad);
-    const cy = clamp(center.y, pad, h - pad);
-
-    const pts: Record<TimeSlotKey, { x: number; y: number }> = {
-      morning: { x: cx - offset, y: cy - offset },
-      noon: { x: cx + offset, y: cy - offset },
-      evening: { x: cx + offset, y: cy + offset },
-      night: { x: cx - offset, y: cy + offset },
-    };
-
-    // 再做一次整体缩放/夹紧，避免小屏溢出
-    const scale = Math.min(
-      1,
-      (w - pad * 2) / (offset * 2 + r * 2),
-      (h - pad * 2) / (offset * 2 + r * 2),
-    );
-    if (scale < 1) {
-      for (const k of Object.keys(pts) as TimeSlotKey[]) {
-        const p = pts[k];
-        const dx = p.x - cx;
-        const dy = p.y - cy;
-        pts[k] = { x: cx + dx * scale, y: cy + dy * scale };
-      }
-    }
-
-    const out: Record<string, { x: number; y: number }> = {};
-    for (const k of Object.keys(pts) as TimeSlotKey[]) out[k] = pts[k];
-    return out;
-  }, [size.width, size.height, center.x, center.y]);
-
-  const categoryBubbles = useMemo(() => {
-    if (mode !== "category" || !selectedTime) return [];
-    const cats = selectedTime.categories;
-    const n = cats.length;
-    const rCat = 62;
-    const rSelected = 92; // 选中时间气泡的“最终半径”在渲染里固定
-
-    // 让分类圆彼此相交：控制相邻圆的 chord length < 2*rCat
-    // chord = 2*R*sin(pi/n) => R = chord / (2*sin(pi/n))
-    const targetChord = 2 * rCat * 0.78; // 约 22% 相交
-    const minOrbitForOverlap = targetChord / (2 * Math.sin(Math.PI / n));
-
-    // 同时避免“直接盖住中心气泡”：让分类圆中心离中心 >= rSelected + rCat * 1.05
-    const minOrbitForCenterClear = rSelected + rCat * 1.05;
-
-    const orbit = Math.max(minOrbitForOverlap, minOrbitForCenterClear);
-
-    // 每个时间段给一个稳定旋转，避免看起来“散”
-    const baseRotate =
-      selectedTime.key === "morning"
-        ? -Math.PI / 2
-        : selectedTime.key === "noon"
-          ? -Math.PI / 3
-          : selectedTime.key === "evening"
-            ? 0
-            : Math.PI / 3;
-
-    return cats.map((c, i) => {
-      const a = baseRotate + (2 * Math.PI * i) / n;
-      return {
-        id: `cat:${selectedTime.key}:${c.key}`,
-        category: c,
-        label: c.label,
-        radius: rCat,
-        tone: "category" as const,
-        x: center.x + orbit * Math.cos(a),
-        y: center.y + orbit * Math.sin(a),
-      };
-    });
-  }, [mode, selectedTime, center.x, center.y]);
-
-  // 极简导航：Esc 返回；Shift+Esc 重选
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      if (mode === "time") return;
-      e.preventDefault();
-      if (e.shiftKey) resetToRoot();
-      else back();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode]);
-
   return (
-    <div className="min-h-screen overflow-hidden bg-[radial-gradient(1200px_circle_at_20%_10%,rgba(56,189,248,0.16),transparent_45%),radial-gradient(900px_circle_at_80%_20%,rgba(167,139,250,0.14),transparent_45%),radial-gradient(900px_circle_at_50%_90%,rgba(34,197,94,0.10),transparent_45%),linear-gradient(to_bottom,rgb(9,9,11),rgb(0,0,0))] text-zinc-50">
-      <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:py-12">
-        <div
-          ref={stageRef}
-          className="relative h-[520px] w-full"
-          onClick={(e) => {
-            // 点击空白区域=返回（避免点到气泡也触发）
-            if (mode === "time") return;
-            if (e.target !== e.currentTarget) return;
-            back();
-          }}
-          onDoubleClick={(e) => {
-            // 双击空白=重选
-            if (mode === "time") return;
-            if (e.target !== e.currentTarget) return;
-            resetToRoot();
-          }}
+    <div className="min-h-screen overflow-hidden bg-[radial-gradient(800px_circle_at_25%_20%,rgba(250,204,21,0.35),transparent_55%),radial-gradient(900px_circle_at_85%_25%,rgba(244,114,182,0.35),transparent_55%),radial-gradient(1000px_circle_at_50%_85%,rgba(34,211,238,0.28),transparent_60%),linear-gradient(to_bottom,#07070b,#000)] text-white">
+      <main className="mx-auto w-full max-w-md px-5 pb-10 pt-10">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="mt-10"
         >
-          {/* 第一层：时间气泡（点击后不切整页，只做焦点展开） */}
-          {timeBubbles.map((b) => {
-            const base = timePositions[b.id];
-            if (!base) return null;
+          <div className="text-center text-sm font-medium text-white/70">
+            极速记账
+          </div>
 
-            const isSelected = selectedTimeKey === b.id;
-            const isFocusing = mode !== "time" && isSelected;
-            const isHidden = mode !== "time" && !isSelected;
-
-            const target = isFocusing ? { x: center.x, y: center.y } : base;
-            const targetRadius = isFocusing ? 92 : b.radius;
-
-            return (
-              <Bubble
-                key={b.id}
-                label={b.label}
-                subLabel={mode === "time" ? b.subLabel : undefined}
-                radius={targetRadius}
-                x={target.x}
-                y={target.y}
-                tone={b.tone}
-                floating={mode === "time"}
-                visible={!isHidden}
-                scale={isFocusing ? 1.08 : 1}
-                disabled={isHidden}
-                zIndex={isFocusing ? 30 : 10}
-                onClick={() => {
-                  if (mode !== "time") return;
-                  setToast(null);
-                  setSelectedTimeKey(b.time.key);
-                  setSelectedCategory(null);
-                  setMode("category");
-                }}
+          <div className="mt-6">
+            <div className="text-center text-[52px] font-semibold tracking-tight">
+              <span className="mr-2 align-middle text-white/60">¥</span>
+              <input
+                value={amountText}
+                onChange={(e) => setAmountText(e.target.value)}
+                inputMode="decimal"
+                placeholder="0"
+                className="w-[220px] bg-transparent text-center text-[52px] font-semibold tracking-tight text-white outline-none placeholder:text-white/20"
               />
-            );
-          })}
+            </div>
+            <div className="mx-auto mt-3 h-px w-44 bg-white/20" />
+          </div>
 
-          {/* 第二层：围绕选中气泡的相交分类圆 */}
-          {categoryBubbles.map((c) => (
-            <Bubble
-              key={c.id}
-              label={c.label}
-              radius={c.radius}
-              x={c.x}
-              y={c.y}
-              tone={c.tone}
-              floating={false}
-              visible={mode === "category"}
-              scale={1}
-              zIndex={20}
-              onClick={() => {
-                setToast(null);
-                setSelectedCategory(c.category);
-                setMode("amount");
-              }}
-            />
-          ))}
+          <div className="mt-6">
+            <div className="flex items-center justify-center">
+              <AnimatePresence mode="popLayout" initial={false}>
+                <motion.div
+                  key={quickMode === "coarse" ? "coarse" : `fine:${coarseBase ?? "x"}`}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.16 }}
+                  className="flex flex-wrap items-center justify-center gap-2"
+                >
+                  {quickValues.map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => onQuickTap(v)}
+                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
+                    >
+                      {v}
+                    </button>
+                  ))}
 
-          {/* 第三层：金额输入（保持极简，不显示气泡） */}
-          {mode === "amount" && selectedTime && selectedCategory ? (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="pointer-events-auto w-full max-w-md px-6">
-                <div className="text-center text-xs text-zinc-300">
-                  {selectedTime.label} · {selectedCategory.label}
-                </div>
-
-                <div className="mt-5 grid gap-5">
-                  <div>
-                    <input
-                      value={amountText}
-                      onChange={(e) => setAmountText(e.target.value)}
-                      inputMode="decimal"
-                      placeholder="金额（例如 14 或 23.5）"
-                      className="h-12 w-full bg-transparent text-center text-3xl font-semibold tracking-tight text-zinc-50 outline-none placeholder:text-zinc-600"
-                    />
-                    <div className="mx-auto mt-2 h-px w-44 bg-zinc-700/70" />
-                  </div>
-
-                  <div className="text-center">
+                  {quickMode === "fine" ? (
                     <button
                       type="button"
-                      onClick={() => submitAmount()}
-                      disabled={loading}
-                      className="text-sm font-semibold text-zinc-100 hover:text-white disabled:opacity-60"
+                      onClick={() => {
+                        setQuickMode("coarse");
+                        setCoarseBase(null);
+                      }}
+                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/70 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
                     >
-                      {loading ? "提交中…" : "提交"}
+                      返回
                     </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
+                  ) : null}
 
-        {toast ? (
-          <div className="mt-3 text-center text-sm">
-            <span className={toast.type === "success" ? "text-emerald-300" : "text-red-300"}>
-              {toast.message}
-            </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAmountText("");
+                      setQuickMode("coarse");
+                      setCoarseBase(null);
+                    }}
+                    className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/70 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
+                  >
+                    清空
+                  </button>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+
+            <div className="mt-2 text-center text-xs text-white/40">
+              小额点选；大额直接输入
+            </div>
           </div>
-        ) : null}
+
+          {/* 时间段 -> 类别：像金额一样“一排联动” */}
+          <div className="mt-7">
+            <div className="mx-auto flex max-w-sm items-center justify-center">
+              <AnimatePresence mode="popLayout" initial={false}>
+                {/* 第1层：时间段 */}
+                {categoryLevel === "time" ? (
+                  <motion.div
+                    key="cat:time"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.16 }}
+                    className="flex flex-wrap items-center justify-center gap-2"
+                  >
+                    {(
+                      [
+                        { k: "morning", label: "早上", c: "bg-sky-400/25 text-sky-100" },
+                        { k: "noon", label: "中午", c: "bg-amber-400/25 text-amber-100" },
+                        { k: "afternoon", label: "下午", c: "bg-cyan-400/25 text-cyan-100" },
+                        { k: "evening", label: "晚上", c: "bg-fuchsia-400/25 text-fuchsia-100" },
+                        { k: "night", label: "夜晚", c: "bg-indigo-400/25 text-indigo-100" },
+                      ] as const
+                    ).map((x) => {
+                      const active = timeKey === x.k;
+                      return (
+                        <button
+                          key={x.k}
+                          type="button"
+                          onClick={() => {
+                            setTimeKey(x.k);
+                            // 默认带一个该时间段最常见的类别，减少一步
+                            const preset = TIME_PRESETS.find((t) => t.key === x.k);
+                            if (preset?.categories?.[0]) setCategory(preset.categories[0]);
+                            setCategoryLevel("preset");
+                          }}
+                          className={[
+                            "rounded-full px-4 py-2 text-sm backdrop-blur transition",
+                            x.c,
+                            active ? "ring-2 ring-white/35" : "opacity-80 hover:opacity-100",
+                          ].join(" ")}
+                        >
+                          {x.label}
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                ) : null}
+
+                {/* 第2层：时间段对应类别 + 通用 + 返回 */}
+                {categoryLevel === "preset" ? (
+                  <motion.div
+                    key={`cat:preset:${timeKey}`}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.16 }}
+                    className="flex flex-wrap items-center justify-center gap-2"
+                  >
+                    {timePreset.categories.map((c) => {
+                      const active = category === c;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setCategory(c)}
+                          className={[
+                            "rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur transition",
+                            active ? "ring-2 ring-white/35" : "opacity-80 hover:opacity-100",
+                          ].join(" ")}
+                        >
+                          {c}
+                        </button>
+                      );
+                    })}
+
+                    <button
+                      type="button"
+                      onClick={() => setCategoryLevel("general")}
+                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
+                    >
+                      通用
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCategoryLevel("time")}
+                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/70 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
+                    >
+                      返回
+                    </button>
+                  </motion.div>
+                ) : null}
+
+                {/* 第3层：通用（不常用）类别 + 返回 */}
+                {categoryLevel === "general" ? (
+                  <motion.div
+                    key="cat:general"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.16 }}
+                    className="flex flex-wrap items-center justify-center gap-2"
+                  >
+                    {["理发", "手机话费", "房租", "其他"].map((c) => {
+                      const active = category === c;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => {
+                            if (c === "其他") {
+                              setCustomCategory("");
+                              setCategoryLevel("custom");
+                            } else {
+                              setCategory(c);
+                            }
+                          }}
+                          className={[
+                            "rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur transition",
+                            active ? "ring-2 ring-white/35" : "opacity-80 hover:opacity-100",
+                          ].join(" ")}
+                        >
+                          {c}
+                        </button>
+                      );
+                    })}
+
+                    <button
+                      type="button"
+                      onClick={() => setCategoryLevel("preset")}
+                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/70 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
+                    >
+                      返回
+                    </button>
+                  </motion.div>
+                ) : null}
+
+                {/* 第4层：自定义“其他”输入框（同一行覆盖） */}
+                {categoryLevel === "custom" ? (
+                  <motion.div
+                    key="cat:custom"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.16 }}
+                    className="flex flex-wrap items-center justify-center gap-2"
+                  >
+                    <input
+                      value={customCategory}
+                      onChange={(e) => setCustomCategory(e.target.value)}
+                      placeholder="输入类型"
+                      className="h-10 w-40 rounded-full bg-white/10 px-4 text-sm text-white outline-none placeholder:text-white/40 backdrop-blur"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = customCategory.trim();
+                        if (!v) return;
+                        setCategory(v);
+                        setCategoryLevel("general");
+                      }}
+                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
+                    >
+                      确定
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCategoryLevel("general")}
+                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/70 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
+                    >
+                      返回
+                    </button>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+            </div>
+          </div>
+
+          <div className="mt-10 flex justify-center">
+            <motion.button
+              type="button"
+              onClick={() => submit()}
+              disabled={loading}
+              whileTap={{ scale: 0.98 }}
+              className="h-14 w-full rounded-2xl bg-[linear-gradient(90deg,rgba(250,204,21,0.95),rgba(244,114,182,0.92),rgba(34,211,238,0.92))] text-base font-semibold text-black shadow-[0_18px_60px_rgba(244,114,182,0.22)] disabled:opacity-60"
+            >
+              {loading ? "记录中…" : "记录"}
+            </motion.button>
+          </div>
+
+          {toast ? (
+            <div className="mt-4 text-center text-sm">
+              <span className={toast.type === "success" ? "text-emerald-200" : "text-red-200"}>
+                {toast.message}
+              </span>
+            </div>
+          ) : (
+            <div className="mt-4 text-center text-xs text-white/40">
+              {today} · {timePreset.label} · {category}
+            </div>
+          )}
+        </motion.div>
       </main>
     </div>
   );
