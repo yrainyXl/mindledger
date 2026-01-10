@@ -123,7 +123,11 @@ export default function Home() {
         return;
       }
 
-      setToast({ type: "success", message: "已记录" });
+      const amountTextDisplay = amount % 1 === 0 ? String(amount) : amount.toFixed(2);
+      setToast({
+        type: "success",
+        message: `已记录：${timePreset.label}·${category} ¥${amountTextDisplay}`,
+      });
       setAmountText("");
       setQuickMode("coarse");
       setCoarseBase(null);

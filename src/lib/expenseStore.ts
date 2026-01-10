@@ -54,3 +54,20 @@ export async function addExpense(input: ExpenseInput) {
   return record;
 }
 
+export async function markExpenseNotionSynced(params: {
+  id: string;
+  notionPageId: string;
+  notionUrl: string;
+}) {
+  const db = await readDb();
+  const idx = db.items.findIndex((x) => x.id === params.id);
+  if (idx === -1) return;
+  const existing = db.items[idx]!;
+  db.items[idx] = {
+    ...existing,
+    notionPageId: params.notionPageId,
+    notionUrl: params.notionUrl,
+    notionSyncedAt: new Date().toISOString(),
+  };
+  await writeDb(db);
+}

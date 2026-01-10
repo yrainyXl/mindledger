@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { expenseInputSchema } from "@/lib/expenseSchema";
-import { addExpense, listExpenses } from "@/lib/expenseStore";
+import { addExpense, listExpenses, markExpenseNotionSynced } from "@/lib/expenseStore";
+import { createNotionExpense, notionEnabled } from "@/lib/notion";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET() {
   const items = await listExpenses();
@@ -36,7 +38,32 @@ export async function POST(req: Request) {
     }
 
     const record = await addExpense(parsed.data);
-    return NextResponse.json({ ok: true, item: record }, { status: 201 });
+
+    // Notion 同步改为后台异步：先返回本地保存成功，再在后台 best-effort 写入 Notion
+    if (notionEnabled()) {
+      const toSync = record;
+      setTimeout(() => {
+        void (async () => {
+          try {
+            const notion = await createNotionExpense(toSync);
+            await markExpenseNotionSynced({
+              id: toSync.id,
+              notionPageId: notion.pageId,
+              notionUrl: notion.url,
+            });
+          } catch (e) {
+            // 不影响接口响应；仅记录日志方便排查
+            // eslint-disable-next-line no-console
+            console.error("[notion] sync failed", e);
+          }
+        })();
+      }, 0);
+    }
+
+    return NextResponse.json(
+      { ok: true, item: record, localSaved: true, notionSyncScheduled: notionEnabled() },
+      { status: 201 },
+    );
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json(

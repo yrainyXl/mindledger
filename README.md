@@ -14,6 +14,47 @@ npm run dev
 
 访问 `http://localhost:3000`（地址以终端输出为准）。
 
+## Notion 同步（后端自动写入数据库）
+
+本项目支持在 `POST /api/expenses` 时**自动同步写入 Notion Database**（服务端执行，后台异步 best-effort）。
+
+- 接口会**先写入本地并立刻返回**（保证手机端手感快）
+- Notion 写入会在后台进行；失败不会阻塞响应，可在服务端日志中看到 `[notion] sync failed`
+
+### 1) 在 Notion 创建 Integration
+
+- Notion → Settings → Connections → Develop or manage integrations
+- 新建一个 integration，复制 **Internal Integration Token**
+
+### 2) 准备一个 Notion Database（表）
+
+Notion 数据库必定有一个 **Title 属性**（例如常见的 `Name`）。你需要记住它的名字，并在环境变量里通过 `NOTION_TITLE_PROPERTY` 配置（默认 `Name`）。
+
+另外，确保数据库里至少有以下属性（名称需一致）：
+
+- `Name`（或你的 Title 属性名）：Title
+- `Amount`：Number
+- `Currency`：Select
+- `Category`：Select
+- `Date`：Date
+- `Note`：Rich text（可选）
+- `Tags`：Multi-select（可选）
+- `CreatedAt`：Date
+
+并把该数据库 **Share** 给你的 integration（连接权限）。
+
+### 3) 配置环境变量
+
+由于环境限制无法写入 `.env.example`，我提供了模板文件 `notion.env.example`。
+
+把它复制为 `.env.local` 并填入：
+
+- `NOTION_TOKEN`
+- `NOTION_DATABASE_ID`
+- `NOTION_TITLE_PROPERTY`（可选，默认 `Name`）
+
+然后重新启动 `npm run dev`。
+
 ## API
 
 ### `GET /api/expenses`

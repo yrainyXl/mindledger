@@ -46,6 +46,9 @@ export type ExpenseInput = z.infer<typeof expenseInputSchema>;
 export type ExpenseRecord = ExpenseInput & {
   id: string;
   createdAt: string; // ISO string
+  notionPageId?: string;
+  notionUrl?: string;
+  notionSyncedAt?: string; // ISO string
 };
 
 /**
@@ -53,16 +56,22 @@ export type ExpenseRecord = ExpenseInput & {
  * 未来只需要把 store 层替换为 Notion API 写入即可。
  */
 export function toNotionProperties(expense: ExpenseRecord) {
-  return {
+  const props: Record<string, unknown> = {
     Amount: { number: expense.amount },
     Currency: { select: { name: expense.currency } },
     Category: { select: { name: expense.category } },
     Date: { date: { start: expense.date } },
-    Note: expense.note ? { rich_text: [{ text: { content: expense.note } }] } : undefined,
-    Tags: expense.tags
-      ? { multi_select: expense.tags.map((t) => ({ name: t })) }
-      : undefined,
     CreatedAt: { date: { start: expense.createdAt } },
   };
+
+  if (expense.note) {
+    props.Note = { rich_text: [{ text: { content: expense.note } }] };
+  }
+
+  if (expense.tags?.length) {
+    props.Tags = { multi_select: expense.tags.map((t) => ({ name: t })) };
+  }
+
+  return props;
 }
 
