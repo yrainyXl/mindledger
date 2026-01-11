@@ -71,3 +71,39 @@ export async function markExpenseNotionSynced(params: {
   };
   await writeDb(db);
 }
+
+/**
+ * 清理已同步到 Notion 的记录
+ * 删除所有有 notionSyncedAt 字段的记录，保留未同步记录作为备份
+ * @returns 清理统计信息
+ */
+export async function cleanupSyncedExpenses(): Promise<{
+  deleted: number;
+  kept: number;
+  totalBefore: number;
+}> {
+  const db = await readDb();
+  const totalBefore = db.items.length;
+  
+  // 过滤出未同步的记录（没有 notionSyncedAt 字段）
+  const unsynced = db.items.filter((item) => !item.notionSyncedAt);
+  const deleted = totalBefore - unsynced.length;
+  
+  // 只保留未同步的记录
+  db.items = unsynced;
+  await writeDb(db);
+  
+  return {
+    deleted,
+    kept: unsynced.length,
+    totalBefore,
+  };
+}
+
+/**
+ * 获取已同步记录数量（用于判断是否需要清理）
+ */
+export async function getSyncedCount(): Promise<number> {
+  const db = await readDb();
+  return db.items.filter((item) => item.notionSyncedAt).length;
+}

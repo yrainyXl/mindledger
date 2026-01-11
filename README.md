@@ -86,6 +86,41 @@ Notion 数据库必定有一个 **Title 属性**（例如常见的 `Name`）。�
 - `422`：数据校验失败（包含 `details.fieldErrors`）
 - `500`：服务器错误
 
+### `POST /api/expenses/cleanup`
+
+手动触发清理：删除所有已同步到 Notion 的记录（有 `notionSyncedAt` 字段），保留未同步记录作为备份。
+
+成功返回：
+
+- `200`：`{ ok: true, message: "清理完成", stats: { deleted: 10, kept: 5, totalBefore: 15 } }`
+
+## 数据清理机制
+
+本项目实现了**自动清理机制**，用于管理本地 `data/expenses.json` 文件：
+
+### 清理策略
+
+- **删除已同步记录**：所有已成功同步到 Notion 的记录（有 `notionSyncedAt` 字段）会被删除
+- **保留未同步记录**：未同步的记录会保留作为备份，避免数据丢失
+- **自动触发**：每次写入记录后，如果已同步记录数超过阈值，会自动触发清理
+
+### 环境变量配置
+
+在 `.env.local` 中可以配置：
+
+- `EXPENSES_CLEANUP_ENABLED`：是否启用自动清理（默认 `true`，设为 `false` 禁用）
+- `EXPENSES_CLEANUP_THRESHOLD`：触发自动清理的阈值（默认 `100`，即已同步记录达到 100 条时触发）
+
+### 手动清理
+
+可以通过调用 `POST /api/expenses/cleanup` 手动触发清理。
+
+### 注意事项
+
+- 清理操作是**不可逆**的，确保 Notion 同步成功后再清理
+- 自动清理使用后台异步执行，不影响接口响应速度
+- 保留未同步记录作为备份，避免数据丢失
+
 ## 数据存储结构（Notion 预留）
 
 本地存储文件：`data/expenses.json`
@@ -102,14 +137,23 @@ Notion 数据库必定有一个 **Title 属性**（例如常见的 `Name`）。�
       "date": "2026-01-08",
       "note": "和朋友聚餐",
       "tags": ["工作", "聚餐"],
-      "createdAt": "2026-01-08T12:34:56.000Z"
+      "createdAt": "2026-01-08T12:34:56.000Z",
+      "notionPageId": "2e4a5d34-2220-8131-b3ad-fe0ea037199e",
+      "notionUrl": "https://www.notion.so/...",
+      "notionSyncedAt": "2026-01-08T12:34:58.000Z"
     }
   ]
 }
 ```
 
-未来要接入 Notion 时，可以复用 `src/lib/expenseSchema.ts` 的字段定义与
-`toNotionProperties()` 映射逻辑，然后把 `src/lib/expenseStore.ts` 替换为 Notion API 写入即可。
+**字段说明**：
+
+- `id`：唯一标识符（UUID）
+- `amount`、`currency`、`category`、`date`、`note`、`tags`：消费记录的基本信息
+- `createdAt`：创建时间（ISO 8601）
+- `notionPageId`、`notionUrl`、`notionSyncedAt`：Notion 同步信息（可选，仅在成功同步后存在）
+
+已同步到 Notion 的记录会包含 `notionSyncedAt` 字段，这些记录会在自动清理时被删除。
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 

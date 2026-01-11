@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { expenseInputSchema } from "@/lib/expenseSchema";
-import { addExpense, listExpenses, markExpenseNotionSynced } from "@/lib/expenseStore";
+import {
+  addExpense,
+  listExpenses,
+  markExpenseNotionSynced,
+  cleanupSyncedExpenses,
+  getSyncedCount,
+} from "@/lib/expenseStore";
 import { createNotionExpense, notionEnabled } from "@/lib/notion";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +61,34 @@ export async function POST(req: Request) {
             // 不影响接口响应；仅记录日志方便排查
             // eslint-disable-next-line no-console
             console.error("[notion] sync failed", e);
+          }
+        })();
+      }, 0);
+    }
+
+    // 自动清理检查：如果已同步记录超过阈值，后台触发清理
+    const cleanupEnabled = process.env.EXPENSES_CLEANUP_ENABLED !== "false";
+    const cleanupThreshold = Number.parseInt(
+      process.env.EXPENSES_CLEANUP_THRESHOLD || "100",
+      10,
+    );
+
+    if (cleanupEnabled) {
+      setTimeout(() => {
+        void (async () => {
+          try {
+            const syncedCount = await getSyncedCount();
+            if (syncedCount >= cleanupThreshold) {
+              const result = await cleanupSyncedExpenses();
+              // eslint-disable-next-line no-console
+              console.log(
+                `[cleanup] auto cleanup completed: deleted ${result.deleted}, kept ${result.kept}`,
+              );
+            }
+          } catch (e) {
+            // 清理失败不影响接口响应；仅记录日志
+            // eslint-disable-next-line no-console
+            console.error("[cleanup] auto cleanup failed", e);
           }
         })();
       }, 0);

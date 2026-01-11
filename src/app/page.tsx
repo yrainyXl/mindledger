@@ -91,11 +91,13 @@ export default function Home() {
     }
 
     const note = "";
+    const finalCategory =
+      categoryLevel === "custom" && customCategory.trim() ? customCategory.trim() : category;
 
     const candidate = {
       amount,
       currency: "CNY",
-      category,
+      category: finalCategory,
       date: today,
       note,
       tags: [timePreset.label],
@@ -126,11 +128,13 @@ export default function Home() {
       const amountTextDisplay = amount % 1 === 0 ? String(amount) : amount.toFixed(2);
       setToast({
         type: "success",
-        message: `已记录：${timePreset.label}·${category} ¥${amountTextDisplay}`,
+        message: `已记录：${timePreset.label}·${finalCategory} ¥${amountTextDisplay}`,
       });
       setAmountText("");
       setQuickMode("coarse");
       setCoarseBase(null);
+      setCategoryLevel("time");
+      setCustomCategory("");
     } catch {
       setToast({ type: "error", message: "网络异常，请稍后重试。" });
     } finally {
@@ -250,9 +254,12 @@ export default function Home() {
                           type="button"
                           onClick={() => {
                             setTimeKey(x.k);
-                            // 默认带一个该时间段最常见的类别，减少一步
-                            const preset = TIME_PRESETS.find((t) => t.key === x.k);
-                            if (preset?.categories?.[0]) setCategory(preset.categories[0]);
+                            // 只在 time 层级且 category 为默认/未设置时，才自动带入预设类别
+                            // 这样用户在“通用/其他”选好类别后，再切时间段就不会被覆盖
+                            if (categoryLevel === "time") {
+                              const preset = TIME_PRESETS.find((t) => t.key === x.k);
+                              if (preset?.categories?.[0]) setCategory(preset.categories[0]);
+                            }
                             setCategoryLevel("preset");
                           }}
                           className={[
@@ -418,7 +425,8 @@ export default function Home() {
             </div>
           ) : (
             <div className="mt-4 text-center text-xs text-white/40">
-              {today} · {timePreset.label} · {category}
+              {today} · {timePreset.label} ·{" "}
+              {categoryLevel === "custom" && customCategory.trim() ? customCategory.trim() : category}
             </div>
           )}
         </motion.div>

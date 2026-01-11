@@ -13,7 +13,21 @@
 | **tsconfig.json** | - | TypeScript 编译器配置（Java 不需要） |
 | **Node.js** | **JVM** | 运行时环境 |
 
-### 1.2 架构层次对比
+### 1.2 数据流向图
+
+```mermaid
+graph TD
+    A["前端页面 (src/app/page.tsx)"] -->|"1. POST /api/expenses"| B["API 路由 (src/app/api/expenses/route.ts)"]
+    B -->|"2. 校验数据"| C["Zod Schema (src/lib/expenseSchema.ts)"]
+    B -->|"3. 写入本地"| D["Store 层 (src/lib/expenseStore.ts)"]
+    D -->|"4. JSON 文件"| E[("data/expenses.json")]
+    B -.->|"5. 异步同步 (setTimeout)"| F["Notion 集成 (src/lib/notion.ts)"]
+    F -->|"6. 写入云端"| G[("Notion Database")]
+    B -.->|"7. 自动清理 (超过阈值)"| D
+    D -.->|"8. 删除已同步记录"| E
+```
+
+### 1.3 架构层次对比
 
 ```
 Java/Spring Boot 架构:
@@ -39,12 +53,14 @@ Node.js/Next.js 架构:
 └─────────────────┘
 ```
 
-### 1.3 项目特点
+### 1.4 项目特点
 
 - **全栈框架**：Next.js 同时提供前端和后端功能，类似 Spring Boot
 - **服务端渲染（SSR）**：在服务器端渲染页面，提高首屏加载速度
 - **API Routes**：内置 API 路由，无需单独搭建后端服务器
 - **类型安全**：TypeScript 提供编译时类型检查，类似 Java 的强类型
+- **本地优先**：数据先落盘本地 JSON，异步同步云端，保证极致的手机端交互手感
+- **自动清理**：通过 `notionSyncedAt` 标记位自动管理本地存储空间
 
 ---
 
@@ -65,11 +81,13 @@ Node.js/Next.js 架构:
 }
 ```
 
-**与 Java 对比：**
-- `next` → Spring Boot Starter Web
-- `react` → Thymeleaf + 前端框架
-- `zod` → Hibernate Validator / Bean Validation
-- `@notionhq/client` → Notion SDK（Java 版本）
+| Node.js/Next.js | Java/Spring Boot | 说明 |
+|----------------|------------------|------|
+| `next` | Spring Boot Starter Web | 核心 Web 框架 |
+| `react` | Thymeleaf + 前端框架 | UI 构建库 |
+| `zod` | Hibernate Validator | 数据校验（Bean Validation） |
+| `framer-motion`| - | 声明式动画库，用于实现流畅的交互体验 |
+| `@notionhq/client` | Notion SDK | 第三方服务集成 |
 
 ### 2.2 开发依赖
 
@@ -112,7 +130,9 @@ mindledger-cursor/
 │   ├── app/                       # Next.js App Router（核心）
 │   │   ├── api/                   # API 路由（后端）
 │   │   │   └── expenses/
-│   │   │       └── route.ts       # 消费记录 API
+│   │   │       ├── cleanup/       
+│   │   │       │   └── route.ts   # 存储清理 API
+│   │   │       └── route.ts       # 消费记录增删改查 API
 │   │   ├── favicon.ico            # 网站图标
 │   │   ├── globals.css            # 全局样式
 │   │   ├── layout.tsx             # 根布局组件
@@ -260,52 +280,52 @@ export default function RootLayout({
 
 ### 4.5 src/app/page.tsx（首页）
 
-**作用**：首页组件，类似 Java 的 `@Controller` + Thymeleaf 模板
+**作用**：首页组件，类似 Java 的 `@Controller` + Thymeleaf 模板。
+
+**项目亮点**：
+- **极速记账交互**：针对移动端优化，支持根据时间段（早、中、晚）智能预设分类，并提供大额数字点选键盘。
+- **流畅动画**：集成 `framer-motion`，实现状态切换时的丝滑过渡动画（类似 Native App 体验）。
 
 ```typescript
-"use client";  // 标记为客户端组件
+"use client";  // 标记为客户端组件，支持 React Hooks 和浏览器 API
 
-import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Home() {
-  const [amount, setAmount] = useState("");
-
+  // ... 状态管理逻辑
   return (
-    <div>
-      <input value={amount} onChange={(e) => setAmount(e.target.value)} />
-      <button>记录</button>
-    </div>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+       {/* 响应式布局内容 */}
+    </motion.div>
   );
 }
 ```
 
-**生成方式**：使用 `create-next-app` 自动生成，然后手动修改
-
 ### 4.6 src/app/api/expenses/route.ts（API 路由）
 
-**作用**：API 路由，类似 Java 的 `@RestController`
+**作用**：API 路由，类似 Java 的 `@RestController`。
+
+**核心逻辑**：
+1. **数据校验**：使用 Zod 验证请求体。
+2. **本地落盘**：先写入本地 JSON，确保响应速度（201 Created）。
+3. **后台异步**：通过 `setTimeout(..., 0)` 开启后台任务，不阻塞主线程：
+   - **Notion 同步**：将数据同步至 Notion 云端，成功后标记 `notionSyncedAt`。
+   - **自动清理**：检查本地已同步记录数，超过阈值（默认 100 条）则自动删除。
 
 ```typescript
-import { NextResponse } from "next/server";
-
-export async function GET() {
-  // 处理 GET 请求
-  return NextResponse.json({ ok: true, items: [] });
-}
-
 export async function POST(req: Request) {
-  // 处理 POST 请求
   const body = await req.json();
+  const record = await addExpense(body); // 1. 先存本地
+  
+  // 2. 后台异步执行同步和清理（不 await）
+  setTimeout(() => {
+    syncToNotion(record); 
+    checkAndCleanup();
+  }, 0);
+
   return NextResponse.json({ ok: true }, { status: 201 });
 }
 ```
-
-**生成方式**：手动创建文件，Next.js 会自动识别为 API 路由
-
-**路由规则**：
-- 文件路径 `src/app/api/expenses/route.ts` → 路由 `/api/expenses`
-- 导出的 `GET` 函数 → 处理 GET 请求
-- 导出的 `POST` 函数 → 处理 POST 请求
 
 ### 4.7 src/lib/expenseSchema.ts（数据模型和校验）
 
@@ -350,54 +370,22 @@ public class ExpenseInput {
 
 ### 4.8 src/lib/expenseStore.ts（数据存储层）
 
-**作用**：数据访问层，类似 Java 的 `@Repository`
+**作用**：数据访问层，类似 Java 的 `@Repository`。
+
+**核心功能**：
+- `addExpense`: 写入新记录，生成 UUID。
+- `markExpenseNotionSynced`: 标记记录已同步。
+- `cleanupSyncedExpenses`: **核心清理逻辑**。删除所有已同步（有 `notionSyncedAt`）的记录，保留本地存储的精简。
 
 ```typescript
-import { promises as fs } from "fs";
-import path from "path";
-
-const DB_PATH = path.join(process.cwd(), "data", "expenses.json");
-
-export async function listExpenses() {
+// 清理逻辑示例
+export async function cleanupSyncedExpenses() {
   const db = await readDb();
-  return db.items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-}
-
-export async function addExpense(input: ExpenseInput) {
-  const db = await readDb();
-  const record: ExpenseRecord = {
-    ...input,
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  };
-  db.items.unshift(record);
+  // 仅保留未同步记录（类似备份）
+  db.items = db.items.filter(item => !item.notionSyncedAt);
   await writeDb(db);
-  return record;
 }
 ```
-
-**与 Java 对比**：
-```java
-@Repository
-public class ExpenseRepository {
-    public List<Expense> findAll() {
-        return expenseRepository.findAll()
-            .stream()
-            .sorted(Comparator.comparing(Expense::getCreatedAt).reversed())
-            .collect(Collectors.toList());
-    }
-
-    public Expense save(ExpenseInput input) {
-        Expense expense = new Expense();
-        expense.setId(UUID.randomUUID().toString());
-        expense.setCreatedAt(new Date());
-        // 设置其他字段...
-        return expenseRepository.save(expense);
-    }
-}
-```
-
-**生成方式**：手动创建
 
 ### 4.9 src/lib/notion.ts（Notion 集成）
 
@@ -455,9 +443,10 @@ Would you like to customize the default import alias? No
 | 文件 | 创建方式 | 说明 |
 |------|---------|------|
 | `src/app/api/expenses/route.ts` | 手动创建 | API 路由 |
+| `src/app/api/expenses/cleanup/route.ts` | 手动创建 | 清理路由 |
 | `src/lib/expenseSchema.ts` | 手动创建 | 数据模型 |
 | `src/lib/expenseStore.ts` | 手动创建 | 数据存储 |
-| `src/lib/nototion.ts` | 手动创建 | Notion 集成 |
+| `src/lib/notion.ts` | 手动创建 | Notion 集成 |
 | `data/expenses.example.json` | 手动创建 | 数据示例 |
 | `notion.env.example` | 手动创建 | 环境变量模板 |
 
@@ -502,25 +491,24 @@ mvn spring-boot:run
 ```
 用户访问 http://localhost:3000
     ↓
-Next.js 路由系统
+Next.js 路由系统 (src/app/page.tsx)
     ↓
-src/app/page.tsx（前端页面）
-    ↓
-用户提交表单
+用户提交表单 (framer-motion 动画反馈)
     ↓
 fetch("/api/expenses", { method: "POST" })
     ↓
-src/app/api/expenses/route.ts（API 路由）
+API 路由校验 (Zod Schema)
     ↓
-数据校验（expenseInputSchema）
+写入本地存储 (expenseStore.addExpense)
     ↓
-业务逻辑（expenseStore.addExpense）
+立即返回 201 响应 (UI 显示成功提示)
     ↓
-数据存储（data/expenses.json）
-    ↓
-可选：Notion 同步（notion.ts）
-    ↓
-返回响应
+开启后台任务 (setTimeout 0)
+    ├──────────────────────────┐
+    ↓                          ↓
+Notion 同步 (notion.ts)    检查自动清理阈值
+    ↓                          ↓
+标记 notionSyncedAt        执行 cleanupSyncedExpenses
 ```
 
 ### 6.3 构建生产版本
