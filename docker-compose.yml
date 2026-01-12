@@ -1,0 +1,22 @@
+services:
+  mindledger:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mindledger
+    ports:
+      - "3000:3000"
+    environment:
+      # Notion 同步（如不用可不填 / 不启用）
+      # NOTION_TOKEN: ""
+      # NOTION_DATABASE_ID: ""
+      # 自动清理（可选）
+      # EXPENSES_CLEANUP_ENABLED: "true"
+      # EXPENSES_CLEANUP_THRESHOLD: "100"
+      NODE_ENV: "production"
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    volumes:
+      # 持久化本地 JSON 数据库：/app/data/expenses.json
+      - ./data:/app/data
+    restart: unless-stopped
