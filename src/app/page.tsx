@@ -9,7 +9,7 @@ export default function Home() {
 
   // 手机优先：唯一必填就是金额，其它自动填默认值
   const [amountText, setAmountText] = useState<string>("");
-  const [category, setCategory] = useState<string>("其他");
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   type TimeKey = "morning" | "noon" | "afternoon" | "evening" | "night";
   const TIME_PRESETS: { key: TimeKey; label: string; categories: string[] }[] = [
     { key: "morning", label: "早上", categories: ["早餐", "交通"] },
@@ -31,7 +31,9 @@ export default function Home() {
     return TIME_PRESETS.find((t) => t.key === timeKey) ?? TIME_PRESETS[1]!;
   }, [timeKey]);
 
-  type CategoryLevel = "time" | "preset" | "general" | "custom";
+  const GENERAL_CATEGORIES = ["理发", "手机话费", "房租"];
+
+  type CategoryLevel = "time" | "preset" | "custom";
   const [categoryLevel, setCategoryLevel] = useState<CategoryLevel>("time");
   const [customCategory, setCustomCategory] = useState("");
 
@@ -91,13 +93,22 @@ export default function Home() {
     }
 
     const note = "";
-    const finalCategory =
-      categoryLevel === "custom" && customCategory.trim() ? customCategory.trim() : category;
+    
+    // 聚合所有选择的类别，并处理自定义输入（按逗号或空格拆分）
+    const finalCategoriesSet = new Set<string>();
+    
+    if (categoryLevel === "custom" && customCategory.trim()) {
+      // 支持逗号、顿号或空格拆分多个自定义类别
+      const split = customCategory.split(/[,，、\s]+/).map(s => s.trim()).filter(Boolean);
+      split.forEach(s => finalCategoriesSet.add(s));
+    } else {
+      selectedCategories.forEach(c => finalCategoriesSet.add(c));
+    }
 
     const candidate = {
       amount,
       currency: "CNY",
-      category: finalCategory,
+      categories: Array.from(finalCategoriesSet),
       date: today,
       note,
       tags: [timePreset.label],
@@ -105,7 +116,8 @@ export default function Home() {
 
     const parsed = expenseInputSchema.safeParse(candidate);
     if (!parsed.success) {
-      setToast({ type: "error", message: "数据校验失败，请检查金额/备注长度等。" });
+      const errorMsg = parsed.error.issues[0]?.message || "数据校验失败";
+      setToast({ type: "error", message: errorMsg });
       return;
     }
 
@@ -126,14 +138,16 @@ export default function Home() {
       }
 
       const amountTextDisplay = amount % 1 === 0 ? String(amount) : amount.toFixed(2);
+      const categoriesDisplay = candidate.categories.join("·");
       setToast({
         type: "success",
-        message: `已记录：${timePreset.label}·${finalCategory} ¥${amountTextDisplay}`,
+        message: `已记录：${timePreset.label}·${categoriesDisplay} ¥${amountTextDisplay}`,
       });
       setAmountText("");
       setQuickMode("coarse");
       setCoarseBase(null);
       setCategoryLevel("time");
+      setSelectedCategories([]);
       setCustomCategory("");
     } catch {
       setToast({ type: "error", message: "网络异常，请稍后重试。" });
@@ -254,12 +268,7 @@ export default function Home() {
                           type="button"
                           onClick={() => {
                             setTimeKey(x.k);
-                            // 只在 time 层级且 category 为默认/未设置时，才自动带入预设类别
-                            // 这样用户在“通用/其他”选好类别后，再切时间段就不会被覆盖
-                            if (categoryLevel === "time") {
-                              const preset = TIME_PRESETS.find((t) => t.key === x.k);
-                              if (preset?.categories?.[0]) setCategory(preset.categories[0]);
-                            }
+                            setSelectedCategories([]);
                             setCategoryLevel("preset");
                           }}
                           className={[
@@ -285,64 +294,18 @@ export default function Home() {
                     transition={{ duration: 0.16 }}
                     className="flex flex-wrap items-center justify-center gap-2"
                   >
-                    {timePreset.categories.map((c) => {
-                      const active = category === c;
-                      return (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setCategory(c)}
-                          className={[
-                            "rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur transition",
-                            active ? "ring-2 ring-white/35" : "opacity-80 hover:opacity-100",
-                          ].join(" ")}
-                        >
-                          {c}
-                        </button>
-                      );
-                    })}
-
-                    <button
-                      type="button"
-                      onClick={() => setCategoryLevel("general")}
-                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
-                    >
-                      通用
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setCategoryLevel("time")}
-                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/70 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
-                    >
-                      返回
-                    </button>
-                  </motion.div>
-                ) : null}
-
-                {/* 第3层：通用（不常用）类别 + 返回 */}
-                {categoryLevel === "general" ? (
-                  <motion.div
-                    key="cat:general"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.16 }}
-                    className="flex flex-wrap items-center justify-center gap-2"
-                  >
-                    {["理发", "手机话费", "房租", "其他"].map((c) => {
-                      const active = category === c;
+                    {[...timePreset.categories, ...GENERAL_CATEGORIES].map((c) => {
+                      const active = selectedCategories.includes(c);
                       return (
                         <button
                           key={c}
                           type="button"
                           onClick={() => {
-                            if (c === "其他") {
-                              setCustomCategory("");
-                              setCategoryLevel("custom");
-                            } else {
-                              setCategory(c);
-                            }
+                            setSelectedCategories(prev => 
+                              prev.includes(c) 
+                                ? (prev.length > 1 ? prev.filter(x => x !== c) : prev)
+                                : [...prev.filter(x => x === "其他" ? false : true), c]
+                            );
                           }}
                           className={[
                             "rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur transition",
@@ -356,7 +319,18 @@ export default function Home() {
 
                     <button
                       type="button"
-                      onClick={() => setCategoryLevel("preset")}
+                      onClick={() => {
+                        setCustomCategory("");
+                        setCategoryLevel("custom");
+                      }}
+                      className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
+                    >
+                      其他
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCategoryLevel("time")}
                       className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/70 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
                     >
                       返回
@@ -364,7 +338,7 @@ export default function Home() {
                   </motion.div>
                 ) : null}
 
-                {/* 第4层：自定义“其他”输入框（同一行覆盖） */}
+                {/* 第3层：自定义“其他”输入框（同一行覆盖） */}
                 {categoryLevel === "custom" ? (
                   <motion.div
                     key="cat:custom"
@@ -377,7 +351,7 @@ export default function Home() {
                     <input
                       value={customCategory}
                       onChange={(e) => setCustomCategory(e.target.value)}
-                      placeholder="输入类型"
+                      placeholder="类型1, 类型2..."
                       className="h-10 w-40 rounded-full bg-white/10 px-4 text-sm text-white outline-none placeholder:text-white/40 backdrop-blur"
                     />
                     <button
@@ -385,8 +359,11 @@ export default function Home() {
                       onClick={() => {
                         const v = customCategory.trim();
                         if (!v) return;
-                        setCategory(v);
-                        setCategoryLevel("general");
+                        const split = v.split(/[,，、\s]+/).map(s => s.trim()).filter(Boolean);
+                        if (split.length > 0) {
+                          setSelectedCategories(split);
+                        }
+                        setCategoryLevel("preset");
                       }}
                       className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/90 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
                     >
@@ -394,7 +371,7 @@ export default function Home() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setCategoryLevel("general")}
+                      onClick={() => setCategoryLevel("preset")}
                       className="rounded-full bg-white/10 px-4 py-2 text-sm text-white/70 backdrop-blur hover:bg-white/15 active:scale-[0.98]"
                     >
                       返回
@@ -426,7 +403,9 @@ export default function Home() {
           ) : (
             <div className="mt-4 text-center text-xs text-white/40">
               {today} · {timePreset.label} ·{" "}
-              {categoryLevel === "custom" && customCategory.trim() ? customCategory.trim() : category}
+              {categoryLevel === "custom" && customCategory.trim() 
+                ? customCategory.trim().split(/[,，、\s]+/).join("·") 
+                : (selectedCategories.length > 0 ? selectedCategories.join("·") : "未选类别")}
             </div>
           )}
         </motion.div>

@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import crypto from "crypto";
 import { ExpenseInput, ExpenseRecord } from "./expenseSchema";
 
 type ExpenseDb = {
@@ -23,18 +24,34 @@ async function ensureDbFile() {
 async function readDb(): Promise<ExpenseDb> {
   await ensureDbFile();
   const raw = await fs.readFile(DB_PATH, "utf8");
-  const parsed = JSON.parse(raw) as ExpenseDb;
+  const parsed = JSON.parse(raw) as any;
   if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.items)) {
     return { version: 1, items: [] };
   }
-  return parsed;
+
+  // 数据平滑迁移：将旧的 category (string) 转换为 categories (string[])
+  const migratedItems = parsed.items.map((item: any) => {
+    if (item.category && !item.categories) {
+      const { category, ...rest } = item;
+      return { ...rest, categories: [category] };
+    }
+    return item;
+  });
+
+  return { ...parsed, items: migratedItems };
 }
 
 async function writeDb(db: ExpenseDb) {
-  await ensureDbFile();
-  const tmp = `${DB_PATH}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(db, null, 2), "utf8");
-  await fs.rename(tmp, DB_PATH);
+  try {
+    await ensureDbFile();
+    const tmp = `${DB_PATH}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(db, null, 2), "utf8");
+    await fs.rename(tmp, DB_PATH);
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`[expenseStore] writeDb failed to ${DB_PATH}:`, error);
+    throw error;
+  }
 }
 
 export async function listExpenses() {
@@ -43,15 +60,21 @@ export async function listExpenses() {
 }
 
 export async function addExpense(input: ExpenseInput) {
-  const db = await readDb();
-  const record: ExpenseRecord = {
-    ...input,
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  };
-  db.items.unshift(record);
-  await writeDb(db);
-  return record;
+  try {
+    const db = await readDb();
+    const record: ExpenseRecord = {
+      ...input,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    };
+    db.items.unshift(record);
+    await writeDb(db);
+    return record;
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("[expenseStore] addExpense failed:", error);
+    throw error;
+  }
 }
 
 export async function markExpenseNotionSynced(params: {

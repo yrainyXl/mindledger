@@ -99,6 +99,8 @@ export async function POST(req: Request) {
       { status: 201 },
     );
   } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[expenses] POST error:", err);
     if (err instanceof z.ZodError) {
       return NextResponse.json(
         {

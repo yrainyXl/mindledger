@@ -43,7 +43,8 @@ export async function createNotionExpense(expense: ExpenseRecord): Promise<Notio
 
   const titleProp = getTitlePropertyName();
   const baseProps = toNotionProperties(expense) as Record<string, any>;
-  const titleText = `${expense.category} ¥${expense.amount}`;
+  const categoriesText = expense.categories.join(", ");
+  const titleText = `${categoriesText} ¥${expense.amount}`;
   baseProps[titleProp] = { title: [{ text: { content: titleText } }] };
 
   const res = await ctx.client.pages.create({

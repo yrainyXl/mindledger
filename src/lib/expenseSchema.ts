@@ -20,11 +20,10 @@ export const expenseInputSchema = z.object({
     .min(1, "币种不能为空")
     .max(10, "币种过长")
     .default("CNY"),
-  category: z
-    .string()
-    .trim()
-    .min(1, "分类不能为空")
-    .max(50, "分类最多 50 个字符"),
+  categories: z
+    .array(z.string().trim().min(1).max(50))
+    .min(1, "至少选择一个分类")
+    .max(10, "最多选择 10 个分类"),
   date: z
     .string()
     .refine(isValidYyyyMmDd, "日期格式不正确（应为 YYYY-MM-DD）"),
@@ -59,7 +58,7 @@ export function toNotionProperties(expense: ExpenseRecord) {
   const props: Record<string, unknown> = {
     Amount: { number: expense.amount },
     Currency: { select: { name: expense.currency } },
-    Category: { select: { name: expense.category } },
+    Category: { multi_select: expense.categories.map((c) => ({ name: c })) },
     Date: { date: { start: expense.date } },
     CreatedAt: { date: { start: expense.createdAt } },
   };
